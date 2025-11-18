@@ -95,8 +95,8 @@ Thumbs.db
 *.backup
 *.bak
 
-# Machine Learning models
-*.tflite
+# Machine Learning models (except .tflite tracked with Git LFS)
+# *.tflite is now tracked with Git LFS
 *.h5
 *.pkl
 
@@ -109,3 +109,6 @@ coverage.xml
 
 # pytest
 .pytest_cache/
+
+# Machine Learning models - tracked with Git LFS
+# Note: .tflite files are now tracked with Git LFS (see .gitattributes)
