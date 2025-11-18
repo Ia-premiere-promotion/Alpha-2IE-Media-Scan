@@ -11,6 +11,7 @@ from routes.api import api_bp
 from routes.users import users_bp
 from routes.dashboard import dashboard_bp
 from routes.pipeline import pipeline_bp
+from routes.export import export_bp
 
 jwt = JWTManager()
 
@@ -95,10 +96,16 @@ def create_app(config_name='development'):
     # Initialiser JWT
     jwt.init_app(app)
     
-    # CORS - Configuration complète pour éviter les redirections
+    # CORS - Configuration complète pour production (Vercel)
     CORS(app, 
          resources={r"/api/*": {
-             "origins": ["http://localhost:5173", "http://127.0.0.1:5173"],
+             "origins": [
+                 "http://localhost:5173", 
+                 "http://127.0.0.1:5173",
+                 "http://localhost:5174",
+                 "https://alpha-2-ie-media-scan.vercel.app",
+                 "https://*.vercel.app"
+             ],
              "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
              "allow_headers": ["Content-Type", "Authorization"],
              "expose_headers": ["Content-Type", "Authorization"],
@@ -113,6 +120,7 @@ def create_app(config_name='development'):
     app.register_blueprint(users_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(pipeline_bp)
+    app.register_blueprint(export_bp)
     
     # Route de base
     @app.route('/')

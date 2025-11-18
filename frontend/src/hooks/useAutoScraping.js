@@ -46,7 +46,8 @@ const useAutoScraping = (intervalMinutes = 15) => {
         }
       });
       
-      const response = await fetch('http://localhost:5000/api/pipeline/run', {
+      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+      const response = await fetch(`${API_URL}/api/pipeline/run`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -83,7 +84,8 @@ const useAutoScraping = (intervalMinutes = 15) => {
   // Vérifier l'état du scraping
   const checkScrapingStatus = useCallback(async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/pipeline/status');
+      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+      const response = await fetch(`${API_URL}/api/pipeline/status`);
       const data = await response.json();
 
       const wasRunning = isScrapingRunning;

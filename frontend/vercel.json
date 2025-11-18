@@ -1,0 +1,32 @@
+{
+  "version": 2,
+  "name": "media-scan-frontend",
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/assets/(.*)",
+      "dest": "/assets/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ],
+  "env": {
+    "VITE_API_BASE_URL": "@vite_api_base_url",
+    "VITE_APP_NAME": "MÉDIA-SCAN CSC Dashboard",
+    "VITE_APP_VERSION": "1.0.0",
+    "VITE_SUPABASE_URL": "@vite_supabase_url",
+    "VITE_SUPABASE_ANON_KEY": "@vite_supabase_anon_key",
+    "VITE_NODE_ENV": "production",
+    "VITE_DEBUG": "false"
+  }
+}

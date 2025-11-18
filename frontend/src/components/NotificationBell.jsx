@@ -11,7 +11,8 @@ const NotificationBell = ({ onShowReport }) => {
   // Charger les notifications depuis l'API
   const loadNotifications = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/pipeline/notifications');
+      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+      const response = await fetch(`${API_URL}/api/pipeline/notifications`);
       const data = await response.json();
       setNotifications(data.notifications || []);
       setUnreadCount(data.unread_count || 0);
@@ -30,7 +31,8 @@ const NotificationBell = ({ onShowReport }) => {
   // Marquer toutes comme lues
   const markAllAsRead = async () => {
     try {
-      await fetch('http://localhost:5000/api/pipeline/notifications/mark-read', {
+      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+      await fetch(`${API_URL}/api/pipeline/notifications/mark-read`, {
         method: 'POST'
       });
       setUnreadCount(0);
@@ -43,7 +45,8 @@ const NotificationBell = ({ onShowReport }) => {
   // Effacer toutes les notifications
   const clearAll = async () => {
     try {
-      await fetch('http://localhost:5000/api/pipeline/notifications/clear', {
+      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+      await fetch(`${API_URL}/api/pipeline/notifications/clear`, {
         method: 'POST'
       });
       setNotifications([]);

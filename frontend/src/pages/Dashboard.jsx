@@ -42,7 +42,9 @@ import {
   ArrowUp,
   Filter,
   MessageCircle,
-  Repeat2
+  Repeat2,
+  FileSpreadsheet,
+  Download
 } from 'lucide-react';
 import { authAPI } from '../services/api';
 import * as dashboardAPI from '../services/dashboardApi';
@@ -95,6 +97,68 @@ function Dashboard() {
   const [severityFilter, setSeverityFilter] = useState('all');
   
   const user = authAPI.getUser();
+
+  // Export Excel de toute la base de données
+  const exportDatabaseToExcel = async () => {
+    try {
+      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+      const token = localStorage.getItem('access_token');
+      
+      // Afficher un loader avec message de patience
+      toast.loading('📊 Export en cours... Veuillez patienter, cela peut prendre quelques secondes', { 
+        id: 'export-db',
+        duration: Infinity,
+        style: {
+          minWidth: '350px',
+          fontSize: '15px',
+          fontWeight: '600'
+        }
+      });
+      
+      const response = await fetch(`${API_URL}/api/export/database`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Erreur lors de l\'export');
+      }
+
+      // Mettre à jour le message
+      toast.loading('💾 Génération du fichier Excel...', { id: 'export-db' });
+
+      // Récupérer le blob
+      const blob = await response.blob();
+      
+      // Créer un lien de téléchargement
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `MEDIA_SCAN_Database_${new Date().toISOString().slice(0,10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      toast.success('✅ Base de données exportée avec succès !', { 
+        id: 'export-db',
+        duration: 4000,
+        style: {
+          fontSize: '15px',
+          fontWeight: '600'
+        }
+      });
+      
+    } catch (err) {
+      console.error('Erreur export:', err);
+      toast.error('❌ Erreur lors de l\'export de la base de données', { 
+        id: 'export-db',
+        duration: 4000
+      });
+    }
+  };
 
   // Charger les données au montage et quand timeRange change
   useEffect(() => {
@@ -2406,6 +2470,13 @@ function Dashboard() {
         </nav>
 
         <div className="sidebar-footer">
+          {user?.role === 'admin' && (
+            <button className="sidebar-btn export-db" onClick={exportDatabaseToExcel}>
+              <FileSpreadsheet size={20} />
+              <span>Exporter BD Excel</span>
+              <Download size={14} />
+            </button>
+          )}
           <button className="sidebar-btn">
             <Settings size={20} />
             <span>Paramètres</span>

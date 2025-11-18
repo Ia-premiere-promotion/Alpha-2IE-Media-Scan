@@ -37,7 +37,7 @@ const AlertsPanel = ({ onClose }) => {
 
   const loadAlerts = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
       const params = new URLSearchParams({
         is_resolved: 'false',
         limit: '50'
@@ -60,7 +60,7 @@ const AlertsPanel = ({ onClose }) => {
 
   const loadAlertStats = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
       const response = await fetch(`${API_URL}/api/dashboard/alerts/stats`);
       const data = await response.json();
       setAlertStats(data);
@@ -71,7 +71,7 @@ const AlertsPanel = ({ onClose }) => {
 
   const resolveAlert = async (alertId) => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
       const response = await fetch(`${API_URL}/api/dashboard/alerts/${alertId}/resolve`, {
         method: 'PUT'
       });

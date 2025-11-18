@@ -13,7 +13,9 @@ import {
   Search,
   Lock,
   Unlock,
-  Trash2
+  Trash2,
+  FileSpreadsheet,
+  Download
 } from 'lucide-react';
 import { usersAPI } from '../services/api';
 import './UserManagement.css';
@@ -143,6 +145,49 @@ function UserManagement() {
   const cancelDelete = () => {
     setShowDeleteModal(false);
     setUserToDelete(null);
+  };
+
+  // Export Excel de toute la base de données
+  const exportDatabaseToExcel = async () => {
+    try {
+      setLoading(true);
+      const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+      const token = localStorage.getItem('access_token');
+      
+      const response = await fetch(`${API_URL}/api/export/database`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Erreur lors de l\'export');
+      }
+
+      // Récupérer le blob
+      const blob = await response.blob();
+      
+      // Créer un lien de téléchargement
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `MEDIA_SCAN_Database_${new Date().toISOString().slice(0,10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      setSuccessMessage('Base de données exportée avec succès !');
+      setShowSuccessMessage(true);
+      setTimeout(() => setShowSuccessMessage(false), 3000);
+      
+    } catch (err) {
+      setError(err.message || 'Erreur lors de l\'export');
+      console.error('Erreur export:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const filteredUsers = users.filter(user => 

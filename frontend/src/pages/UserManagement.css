@@ -566,3 +566,66 @@
   flex-shrink: 0;
 }
 
+/* Export Database Section */
+.export-database-section {
+  margin-top: 3rem;
+  padding: 2rem;
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border-radius: 16px;
+  border: 2px solid #3b82f6;
+  text-align: center;
+}
+
+.btn-export-database {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 2rem;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+}
+
+.btn-export-database:hover:not(:disabled) {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 25px rgba(59, 130, 246, 0.5);
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+}
+
+.btn-export-database:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-export-database svg:first-child {
+  width: 24px;
+  height: 24px;
+}
+
+.btn-export-database svg:last-child {
+  width: 18px;
+  height: 18px;
+  animation: bounce 2s infinite;
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+.export-info {
+  margin-top: 1rem;
+  color: #1e40af;
+  font-size: 0.9rem;
+  font-weight: 500;
+}

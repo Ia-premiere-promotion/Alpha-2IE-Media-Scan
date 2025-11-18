@@ -9,6 +9,7 @@ Similaire au pipeline Web mais adapté pour les posts Facebook
 import sys
 import json
 import csv
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict
@@ -264,6 +265,20 @@ class FacebookOrchestrator:
         
         return articles
     
+    def cleanup_temp_csv(self, csv_path: str):
+        """
+        Supprime un fichier CSV temporaire
+        
+        Args:
+            csv_path: Chemin du fichier à supprimer
+        """
+        try:
+            if os.path.exists(csv_path):
+                os.remove(csv_path)
+                print(f"🗑️  Fichier temporaire supprimé: {os.path.basename(csv_path)}")
+        except Exception as e:
+            print(f"⚠️  Erreur suppression {csv_path}: {e}")
+    
     def export_to_csv(self, articles: List[Dict], filename: str) -> str:
         """
         Exporte en CSV
@@ -418,6 +433,14 @@ class FacebookOrchestrator:
             print(f"\n{'='*70}")
             print(f"🎉 PIPELINE FACEBOOK TERMINÉ")
             print(f"{'='*70}\n")
+            
+            # Nettoyage des fichiers CSV temporaires
+            print(f"\n🧹 Nettoyage des fichiers temporaires...")
+            if 'csv_brut' in locals():
+                self.cleanup_temp_csv(csv_brut)
+            if 'csv_valide' in locals():
+                self.cleanup_temp_csv(csv_valide)
+            print(f"✅ Nettoyage terminé\n")
         
         return self.stats
 

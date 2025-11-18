@@ -85,6 +85,9 @@ class PipelineOrchestrator:
         
         # ID du log en cours (pour enregistrement en BD)
         self.scraping_log_id = None
+        
+        # Liste des fichiers CSV temporaires créés (pour suppression auto)
+        self.temp_csv_files = []
     
     def run_scraping(self, max_articles_per_section=20, facebook_max_posts=50):
         """
@@ -278,6 +281,9 @@ class PipelineOrchestrator:
                 print(f"   - Ignorés: {skipped}")
             print(f"   - Fichier: {csv_path}")
             
+            # Ajouter à la liste des fichiers temporaires pour suppression ultérieure
+            self.temp_csv_files.append(str(csv_path))
+            
             return str(csv_path)
             
         except Exception as e:
@@ -429,6 +435,9 @@ class PipelineOrchestrator:
             if self.scraping_log_id:
                 self._update_scraping_log(start_time, 'completed')
             
+            # Supprimer les fichiers CSV temporaires
+            self._cleanup_temp_csv_files()
+            
             # Afficher le résumé
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
@@ -539,7 +548,41 @@ class PipelineOrchestrator:
             print(f"⚠️ Erreur enregistrement détails par média: {e}")
             import traceback
             traceback.print_exc()
-
+    
+    def _cleanup_temp_csv_files(self):
+        """
+        Supprime automatiquement les fichiers CSV temporaires après utilisation
+        """
+        if not self.temp_csv_files:
+            return
+        
+        print(f"\n{'='*70}")
+        print(f"🧹 NETTOYAGE DES FICHIERS TEMPORAIRES")
+        print(f"{'='*70}")
+        
+        deleted_count = 0
+        failed_count = 0
+        
+        for csv_file in self.temp_csv_files:
+            try:
+                csv_path = Path(csv_file)
+                if csv_path.exists():
+                    csv_path.unlink()  # Supprime le fichier
+                    print(f"✅ Supprimé: {csv_path.name}")
+                    deleted_count += 1
+                else:
+                    print(f"⚠️ Fichier introuvable: {csv_path.name}")
+            except Exception as e:
+                print(f"❌ Erreur suppression {csv_path.name}: {e}")
+                failed_count += 1
+        
+        print(f"\n📊 Résumé nettoyage:")
+        print(f"   - Fichiers supprimés: {deleted_count}")
+        if failed_count > 0:
+            print(f"   - Échecs: {failed_count}")
+        
+        # Vider la liste
+        self.temp_csv_files = []
 
 
 def main():
