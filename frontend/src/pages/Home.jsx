@@ -56,7 +56,11 @@ function Home() {
         {/* Header and Hero as background text */}
         <div className="page-header-section">
           <div className="logo-section">
-            <Activity className="logo-icon" size={56} />
+            <img 
+              src="/imageonline-co-pixelated-removebg-preview.png" 
+              alt="CSC Logo" 
+              className="home-logo-image"
+            />
             <div className="header-text">
               <h1>MÉDIA-SCAN</h1>
               <p className="tagline">Système Intelligent d'Observation et d'Analyse des Médias au Burkina Faso</p>

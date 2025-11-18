@@ -244,6 +244,17 @@ Réponds uniquement avec le JSON."""
         # Analyse déontologique
         analysis = self.analyze_content(article['titre'], article['contenu'])
         
+        # Sauvegarder le résultat dans la base de données
+        try:
+            self.supabase.table('articles').update({
+                'score_deontologique': analysis['score'] if analysis['score'] >= 0 else None,
+                'analyse_deontologique': analysis['interpretation'],
+                'analyzed_at': datetime.now().isoformat()
+            }).eq('id', article['id']).execute()
+            print(f"  💾 Résultat sauvegardé en base de données")
+        except Exception as e:
+            print(f"  ⚠️  Erreur sauvegarde BD : {e}")
+        
         # Résultat complet
         result = {
             'article_id': article['id'],

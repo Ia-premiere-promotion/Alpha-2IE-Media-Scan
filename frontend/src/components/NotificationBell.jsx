@@ -147,21 +147,14 @@ const NotificationBell = ({ onShowReport }) => {
                     
                     {/* Afficher les stats détaillées si disponibles */}
                     {notif.stats && (
-                      <div className="notification-stats">
-                        <div className="stat-item">
-                          <span className="stat-label">Scrapés</span>
-                          <span className="stat-value">{notif.stats.total_scraped || 0}</span>
-                        </div>
-                        <div className="stat-item">
-                          <span className="stat-label">Insérés</span>
-                          <span className="stat-value success">{notif.stats.total_inserted || 0}</span>
-                        </div>
-                        {notif.stats.total_skipped > 0 && (
-                          <div className="stat-item">
-                            <span className="stat-label">Ignorés</span>
-                            <span className="stat-value warning">{notif.stats.total_skipped}</span>
-                          </div>
-                        )}
+                      <div className="notification-stats-simple">
+                        <span className="stats-info">
+                          Total: <strong>{notif.stats.total_scraped || 0}</strong> scrapés, 
+                          <strong className="inserted"> {notif.stats.total_inserted || 0}</strong> insérés
+                          {notif.stats.total_skipped > 0 && (
+                            <>, <strong className="skipped">{notif.stats.total_skipped}</strong> ignorés</>
+                          )}
+                        </span>
                       </div>
                     )}
                     

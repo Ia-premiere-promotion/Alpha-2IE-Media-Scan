@@ -95,9 +95,9 @@ const useAutoScraping = (intervalMinutes = 15) => {
         
         if (data.last_result.success) {
           // Pop-up de succès
-          const stats = data.last_result.stats;
+          const stats = data.last_result.stats || {};
           toast.success(
-            `Scraping terminé !\n${stats.total_inserted} nouveaux articles insérés`,
+            `Scraping terminé !\n${stats.total_inserted || 0} nouveaux articles insérés`,
             {
               duration: 5000,
               icon: '✅',

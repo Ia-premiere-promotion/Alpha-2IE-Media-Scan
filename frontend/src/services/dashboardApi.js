@@ -65,13 +65,53 @@ export const getMediaDetails = async (mediaId, timeRange = '24h') => {
  * Récupère les alertes
  * @param {boolean} isResolved - Filtrer par statut résolu
  * @param {string} severite - 'critical', 'high', 'medium', 'low' ou null
+ * @param {number} limit - Nombre maximum d'alertes à récupérer
  */
-export const getAlerts = async (isResolved = false, severite = null) => {
+export const getAlerts = async (isResolved = false, severite = null, limit = null) => {
   let url = `${API_BASE_URL}/alerts?is_resolved=${isResolved}`;
   if (severite) url += `&severite=${severite}`;
+  if (limit) url += `&limit=${limit}`;
   
   const response = await fetch(url);
   if (!response.ok) throw new Error('Erreur lors de la récupération des alertes');
+  return response.json();
+};
+
+/**
+ * Récupère les statistiques des alertes
+ */
+export const getAlertStats = async () => {
+  const response = await fetch(`${API_BASE_URL}/alerts/stats`);
+  if (!response.ok) throw new Error('Erreur lors de la récupération des stats d\'alertes');
+  return response.json();
+};
+
+/**
+ * Marque une alerte comme résolue
+ * @param {number} alertId - ID de l'alerte à résoudre
+ */
+export const resolveAlert = async (alertId) => {
+  const response = await fetch(`${API_BASE_URL}/alerts/${alertId}/resolve`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  });
+  if (!response.ok) throw new Error('Erreur lors de la résolution de l\'alerte');
+  return response.json();
+};
+
+/**
+ * Génère de nouvelles alertes pour tous les médias
+ */
+export const generateAlerts = async () => {
+  const response = await fetch(`${API_BASE_URL}/alerts/generate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  });
+  if (!response.ok) throw new Error('Erreur lors de la génération des alertes');
   return response.json();
 };
 
@@ -129,9 +169,13 @@ export const getThematicDistribution = async (mediaId = null, timeRange = '24h')
  */
 export const getTopMedia = async (timeRange = '24h') => {
   const medias = await getMediaList(timeRange);
-  // Trier par engagement total et prendre les 5 premiers
+  // Trier par score d'influence (qui regroupe engagement, articles, followers, ancienneté, régularité)
   return medias
-    .sort((a, b) => b.engagement.total - a.engagement.total)
+    .sort((a, b) => {
+      const scoreA = a.score_influence || 0;
+      const scoreB = b.score_influence || 0;
+      return scoreB - scoreA;
+    })
     .slice(0, 5);
 };
 
@@ -193,6 +237,9 @@ export default {
   getMediaList,
   getMediaDetails,
   getAlerts,
+  getAlertStats,
+  resolveAlert,
+  generateAlerts,
   getRanking,
   getCategories,
   getActivityChart,

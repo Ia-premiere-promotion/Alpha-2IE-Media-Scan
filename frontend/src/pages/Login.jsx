@@ -46,7 +46,11 @@ function Login() {
 
           <div className="welcome-panel">
             <div className="login-branding">
-              <Activity size={60} className="login-logo" />
+              <img 
+                src="/imageonline-co-pixelated-removebg-preview.png" 
+                alt="CSC Logo" 
+                className="login-logo-image"
+              />
               <h1>MÉDIA-SCAN</h1>
               <p className="login-subtitle">Conseil Supérieur de la Communication</p>
             </div>

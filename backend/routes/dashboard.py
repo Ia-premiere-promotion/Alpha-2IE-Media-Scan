@@ -871,12 +871,13 @@ def get_categories():
 
 @dashboard_bp.route('/alerts', methods=['GET'])
 def get_alerts():
-    """Liste des alertes"""
+    """Liste des alertes avec filtres"""
     try:
         supabase = get_supabase()
         
         is_resolved = request.args.get('is_resolved', 'false').lower() == 'true'
         severite = request.args.get('severite')
+        limit = request.args.get('limit', type=int)
         
         # Récupérer les alertes
         query = supabase.table('alerts').select('*')
@@ -885,7 +886,12 @@ def get_alerts():
         if severite:
             query = query.eq('severite', severite)
         
-        alerts_result = query.order('date', desc=True).execute()
+        query = query.order('date', desc=True)
+        
+        if limit:
+            query = query.limit(limit)
+        
+        alerts_result = query.execute()
         
         # Si des alertes existent, enrichir avec les infos des médias
         if alerts_result.data and len(alerts_result.data) > 0:
@@ -908,6 +914,195 @@ def get_alerts():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e), 'alerts': []}), 500
+
+
+@dashboard_bp.route('/alerts/<int:alert_id>/resolve', methods=['PUT'])
+def resolve_alert(alert_id):
+    """Marquer une alerte comme résolue"""
+    try:
+        supabase = get_supabase()
+        
+        result = supabase.table('alerts')\
+            .update({'is_resolved': True})\
+            .eq('id', alert_id)\
+            .execute()
+        
+        if result.data:
+            return jsonify({'success': True, 'alert': result.data[0]})
+        else:
+            return jsonify({'error': 'Alerte non trouvée'}), 404
+    
+    except Exception as e:
+        print(f"❌ Erreur dans resolve_alert: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@dashboard_bp.route('/alerts/generate', methods=['POST'])
+def generate_alerts():
+    """Génère les alertes pour tous les médias actifs"""
+    try:
+        supabase = get_supabase()
+        
+        # Importer le générateur d'alertes
+        import sys
+        sys.path.append('/home/bakouan/Bureau/APP MEDIA SCAN/backend')
+        from utils.alert_generator import AlertGenerator
+        
+        generator = AlertGenerator(supabase)
+        
+        # Récupérer tous les médias actifs avec leurs stats
+        medias = supabase.table('medias')\
+            .select('id, name, followers, creation_date, is_active')\
+            .eq('is_active', True)\
+            .execute()
+        
+        total_alerts = 0
+        alerts_created = []
+        
+        for media in medias.data:
+            # Calculer la régularité
+            ninety_days_ago = datetime.utcnow() - timedelta(days=90)
+            articles_90d = supabase.table('articles')\
+                .select('date')\
+                .eq('media_id', media['id'])\
+                .gte('date', ninety_days_ago.isoformat())\
+                .execute()
+            
+            dates_with_articles = set()
+            for article in articles_90d.data:
+                article_date = datetime.fromisoformat(article['date'].replace('Z', '+00:00')).date()
+                dates_with_articles.add(article_date)
+            
+            days_with_publications = len(dates_with_articles)
+            regularite = (days_with_publications / 90) * 100
+            
+            media['regularite'] = regularite
+            
+            # Générer les alertes pour ce média
+            alerts = generator.generate_alerts_for_media(media)
+            
+            # Sauvegarder les alertes
+            for alert in alerts:
+                if generator.save_alert(alert):
+                    total_alerts += 1
+                    alerts_created.append(alert['titre'])
+        
+        return jsonify({
+            'success': True,
+            'total_alerts': total_alerts,
+            'alerts_created': alerts_created[:20]  # Limiter à 20 pour l'affichage
+        })
+    
+    except Exception as e:
+        print(f"❌ Erreur dans generate_alerts: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@dashboard_bp.route('/alerts/stats', methods=['GET'])
+def get_alerts_stats():
+    """Statistiques sur les alertes"""
+    try:
+        supabase = get_supabase()
+        
+        # Total alertes actives
+        active = supabase.table('alerts')\
+            .select('id', count='exact')\
+            .eq('is_resolved', False)\
+            .execute()
+        
+        # Par sévérité
+        critical = supabase.table('alerts')\
+            .select('id', count='exact')\
+            .eq('is_resolved', False)\
+            .eq('severite', 'critical')\
+            .execute()
+        
+        high = supabase.table('alerts')\
+            .select('id', count='exact')\
+            .eq('is_resolved', False)\
+            .eq('severite', 'high')\
+            .execute()
+        
+        medium = supabase.table('alerts')\
+            .select('id', count='exact')\
+            .eq('is_resolved', False)\
+            .eq('severite', 'medium')\
+            .execute()
+        
+        low = supabase.table('alerts')\
+            .select('id', count='exact')\
+            .eq('is_resolved', False)\
+            .eq('severite', 'low')\
+            .execute()
+        
+        return jsonify({
+            'total_active': active.count or 0,
+            'by_severity': {
+                'critical': critical.count or 0,
+                'high': high.count or 0,
+                'medium': medium.count or 0,
+                'low': low.count or 0
+            }
+        })
+    
+    except Exception as e:
+        print(f"❌ Erreur dans get_alerts_stats: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@dashboard_bp.route('/alerts/deontology', methods=['GET'])
+def get_deontology_alerts():
+    """
+    Récupère les articles avec score déontologique < 5/10
+    (Articles qui ont déclenché ou devraient déclencher une alerte)
+    """
+    try:
+        supabase = get_supabase()
+        
+        # Paramètres optionnels
+        limit = request.args.get('limit', type=int, default=50)
+        media_id = request.args.get('media_id', type=int)
+        
+        # Requête de base
+        query = supabase.table('articles')\
+            .select('id, titre, contenu, url, date, score_deontologique, analyse_deontologique, analyzed_at, medias(id, name, couleur)')\
+            .not_.is_('score_deontologique', 'null')\
+            .lt('score_deontologique', 5.0)\
+            .order('score_deontologique', desc=False)\
+            .order('date', desc=True)\
+            .limit(limit)
+        
+        # Filtre par média si spécifié
+        if media_id:
+            query = query.eq('media_id', media_id)
+        
+        result = query.execute()
+        
+        # Formater les résultats
+        articles = []
+        for article in result.data:
+            articles.append({
+                'id': article['id'],
+                'titre': article['titre'],
+                'contenu': article['contenu'][:500] if article.get('contenu') else '',  # Extrait
+                'url': article['url'],
+                'date': article['date'],
+                'score_deontologique': article['score_deontologique'],
+                'analyse_deontologique': article['analyse_deontologique'],
+                'analyzed_at': article['analyzed_at'],
+                'media': article.get('medias', {})
+            })
+        
+        return jsonify({
+            'total': len(articles),
+            'articles': articles
+        })
+    
+    except Exception as e:
+        print(f"❌ Erreur dans get_deontology_alerts: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 @dashboard_bp.route('/ranking', methods=['GET'])

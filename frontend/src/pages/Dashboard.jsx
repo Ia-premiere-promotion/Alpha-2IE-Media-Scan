@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Toaster } from 'react-hot-toast';
+import { Toaster, toast } from 'react-hot-toast';
 import UserManagement from './UserManagement';
 import NotificationBell from '../components/NotificationBell';
+import AlertsPanel from '../components/AlertsPanel';
 import ScrapingReportModal from '../components/ScrapingReportModal';
 import useAutoScraping from '../hooks/useAutoScraping';
 import { 
@@ -84,6 +85,15 @@ function Dashboard() {
   const [sentimentsData, setSentimentsData] = useState(null); // Données globales des sentiments
   const [displayedPublications, setDisplayedPublications] = useState(5); // Nombre de publications affichées
   const [showScrollTop, setShowScrollTop] = useState(false); // Afficher bouton retour en haut
+  const [showAlertsPanel, setShowAlertsPanel] = useState(false); // Afficher le panel d'alertes
+  const [alertsCount, setAlertsCount] = useState(0); // Nombre d'alertes actives
+  
+  // États pour le système d'alertes (onglet dédié)
+  const [alertsData, setAlertsData] = useState([]);
+  const [alertsStats, setAlertsStats] = useState(null);
+  const [alertsLoading, setAlertsLoading] = useState(true);
+  const [severityFilter, setSeverityFilter] = useState('all');
+  
   const user = authAPI.getUser();
 
   // Charger les données au montage et quand timeRange change
@@ -95,6 +105,83 @@ function Dashboard() {
     
     return () => clearTimeout(timer);
   }, [timeRange]);
+
+  // Charger le nombre d'alertes actives au montage et toutes les 30 secondes
+  useEffect(() => {
+    loadAlertsCount();
+    
+    const interval = setInterval(() => {
+      loadAlertsCount();
+    }, 30000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  // Charger les données du système d'alertes quand l'onglet est actif
+  useEffect(() => {
+    if (activeTab === 'alerts') {
+      loadAlertsData();
+    }
+  }, [activeTab, severityFilter]);
+
+  const loadAlertsCount = async () => {
+    try {
+      const stats = await dashboardAPI.getAlertStats();
+      setAlertsCount(stats.total_active || 0);
+    } catch (error) {
+      console.error('Erreur chargement stats alertes:', error);
+    }
+  };
+
+  const loadAlertsData = async () => {
+    try {
+      setAlertsLoading(true);
+      
+      // Charger les alertes et les stats en parallèle
+      const [alerts, stats] = await Promise.all([
+        dashboardAPI.getAlerts(false, severityFilter === 'all' ? null : severityFilter),
+        dashboardAPI.getAlertStats()
+      ]);
+      
+      // Grouper les alertes par média
+      const alertsByMedia = {};
+      alerts.forEach(alert => {
+        const mediaId = alert.media_id;
+        const mediaName = alert.media?.name || 'Média inconnu';
+        const mediaColor = alert.media?.couleur || '#6B7280';
+        
+        if (!alertsByMedia[mediaId]) {
+          alertsByMedia[mediaId] = {
+            id: mediaId,
+            name: mediaName,
+            color: mediaColor,
+            alerts: []
+          };
+        }
+        
+        alertsByMedia[mediaId].alerts.push(alert);
+      });
+      
+      setAlertsData(Object.values(alertsByMedia));
+      setAlertsStats(stats);
+    } catch (error) {
+      console.error('Erreur chargement alertes:', error);
+      setAlertsData([]);
+    } finally {
+      setAlertsLoading(false);
+    }
+  };
+
+  const resolveAlertInPage = async (alertId) => {
+    try {
+      await dashboardAPI.resolveAlert(alertId);
+      // Recharger les données
+      loadAlertsData();
+      loadAlertsCount(); // Mettre à jour le compteur du header
+    } catch (error) {
+      console.error('Erreur résolution alerte:', error);
+    }
+  };
 
   const loadDashboardData = useCallback(async () => {
     try {
@@ -139,13 +226,21 @@ function Dashboard() {
       // Charger le top médias et transformer les données pour l'UI
       const topMediaData = await dashboardAPI.getTopMedia(timeRange);
       console.log('🏆 Top media data:', topMediaData);
-      const transformedTopMedia = topMediaData.map((media, index) => ({
-        name: media.name,
-        articles: media.total_articles || 0,
-        engagement: formatNumber(media.engagement?.total || 0),
-        trend: index < 2 ? 'up' : 'down', // Les 2 premiers en hausse
-        score: Math.min(Math.round((media.engagement?.total || 0) / 50), 100) // Score basé sur l'engagement
-      }));
+      const transformedTopMedia = topMediaData.map((media, index) => {
+        // Utiliser le score d'influence calculé par le backend
+        const influenceScore = media.score_influence || 0;
+        const totalEngagement = media.engagement?.total || 0;
+        const totalArticles = media.total_articles || 0;
+        
+        return {
+          name: media.name,
+          articles: totalArticles,
+          engagement: formatNumber(totalEngagement),
+          engagementRaw: totalEngagement,
+          trend: index < Math.ceil(topMediaData.length / 2) ? 'up' : 'down',
+          score: Math.round(influenceScore) // Utiliser directement le score d'influence (0-100)
+        };
+      });
       console.log('✅ Transformed top media:', transformedTopMedia);
       setTopMedia(transformedTopMedia);
 
@@ -425,6 +520,118 @@ function Dashboard() {
     });
   };
 
+  // Fonction pour exporter les visuels en PNG format A4
+  const exportDashboardToPNG = async () => {
+    try {
+      // Importer html2canvas dynamiquement
+      const html2canvas = (await import('html2canvas')).default;
+      
+      // Période pour le nom du fichier
+      const periodLabel = timeRange === 'all' ? 'Tous_les_temps' : 
+                         timeRange === '1h' ? '1_heure' : 
+                         timeRange === '6h' ? '6_heures' : 
+                         timeRange === '24h' ? '24_heures' : 
+                         timeRange === '7d' ? '7_jours' : '30_jours';
+
+      // Toast de progression
+      const loadingToast = toast.loading('Préparation de l\'export format A4...');
+
+      // Créer un conteneur format A4 (210mm x 297mm à 96 DPI = 794px x 1123px)
+      const exportContainer = document.createElement('div');
+      exportContainer.style.cssText = `
+        position: fixed;
+        left: -9999px;
+        top: 0;
+        width: 794px;
+        background: white;
+        padding: 40px;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      `;
+      document.body.appendChild(exportContainer);
+
+      // Titre
+      const title = document.createElement('div');
+      title.style.cssText = `
+        font-size: 24px;
+        font-weight: 700;
+        color: #1e293b;
+        margin-bottom: 8px;
+        text-align: center;
+      `;
+      title.textContent = `Dashboard Media Scan - ${periodLabel}`;
+      exportContainer.appendChild(title);
+
+      // Date
+      const dateDiv = document.createElement('div');
+      dateDiv.style.cssText = `
+        font-size: 14px;
+        color: #64748b;
+        margin-bottom: 30px;
+        text-align: center;
+      `;
+      dateDiv.textContent = new Date().toLocaleDateString('fr-FR', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
+      exportContainer.appendChild(dateDiv);
+
+      // Liste des sections à inclure
+      const sectionsToExport = [
+        { selector: '.stats-grid', name: 'Statistiques', marginBottom: '30px' },
+        { selector: '.charts-section', name: 'Graphiques', marginBottom: '30px' },
+        { selector: '.info-section', name: 'Informations', marginBottom: '20px' }
+      ];
+
+      // Cloner et ajouter chaque section
+      for (let i = 0; i < sectionsToExport.length; i++) {
+        const section = sectionsToExport[i];
+        const element = document.querySelector(section.selector);
+        
+        if (element) {
+          toast.loading(`Ajout ${i + 1}/${sectionsToExport.length}: ${section.name}...`, { id: loadingToast });
+          
+          const clone = element.cloneNode(true);
+          clone.style.cssText = `
+            width: 100%;
+            background: transparent;
+            margin-bottom: ${section.marginBottom};
+          `;
+          exportContainer.appendChild(clone);
+        }
+      }
+
+      // Attendre le rendu
+      toast.loading('Génération de l\'image...', { id: loadingToast });
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Capturer en PNG
+      const canvas = await html2canvas(exportContainer, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        logging: false,
+        useCORS: true,
+        width: 794,
+        windowWidth: 794
+      });
+
+      // Télécharger
+      const link = document.createElement('a');
+      link.download = `Dashboard_Complet_${periodLabel}_${new Date().toISOString().split('T')[0]}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+
+      // Nettoyer
+      document.body.removeChild(exportContainer);
+      toast.success('Dashboard exporté en format A4!', { id: loadingToast });
+      
+    } catch (error) {
+      console.error('Erreur export:', error);
+      toast.error('Erreur lors de l\'export du dashboard');
+    }
+  };
+
   const formatNumber = (num) => {
     if (!num) return '0';
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
@@ -537,6 +744,19 @@ function Dashboard() {
 
   const renderGeneralDashboard = () => (
     <>
+      {/* Bouton d'export */}
+      <div className="export-actions-bar">
+        <button className="export-dashboard-btn" onClick={exportDashboardToPNG}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          <span>Exporter les visuels</span>
+          <span className="export-period-badge">{timeRange === 'all' ? 'Tous les temps' : timeRange === '1h' ? '1h' : timeRange === '6h' ? '6h' : timeRange === '24h' ? '24h' : timeRange === '7d' ? '7j' : '30j'}</span>
+        </button>
+      </div>
+
       <div className="stats-grid">
         {stats.map((stat, index) => (
           <div key={index} className="stat-card">
@@ -675,7 +895,7 @@ function Dashboard() {
         <div className="chart-card">
           <div className="chart-header">
             <h3>Top 5 Médias</h3>
-            <p>Classement par activité</p>
+            <p>Classement par score d'influence</p>
           </div>
           <div className="top-media-list">
             {topMedia.map((media, index) => (
@@ -685,20 +905,23 @@ function Dashboard() {
                 </div>
                 <div className="media-info">
                   <h4>{media.name}</h4>
-                  <p>{media.articles} articles</p>
+                  <p>{media.articles} article{media.articles > 1 ? 's' : ''}</p>
                 </div>
                 <div className="media-stats">
-                  <div className="media-engagement">
+                  <div className="media-engagement" title="Engagement total (likes + commentaires + partages)">
                     <Eye size={14} />
-                    <span>{media.engagement}</span>
+                    <span style={{ color: media.engagementRaw === 0 ? '#94a3b8' : 'inherit' }}>
+                      {media.engagement}
+                      {media.engagementRaw === 0 && <span style={{ fontSize: '10px', marginLeft: '4px' }}>(Aucune donnée)</span>}
+                    </span>
                   </div>
-                  <div className={`media-trend ${media.trend}`}>
+                  <div className={`media-trend ${media.trend}`} title={media.trend === 'up' ? 'En progression' : 'Stable/baisse'}>
                     {media.trend === 'up' ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
                   </div>
                 </div>
-                <div className="media-score">
+                <div className="media-score" title={`Score d'influence: ${media.score}/100 (engagement 40%, followers 25%, articles 15%, ancienneté 10%, régularité 10%)`}>
                   <div className="score-circle" style={{ 
-                    background: `conic-gradient(#10b981 ${media.score}%, #e5e7eb ${media.score}%)`
+                    background: `conic-gradient(${media.score > 50 ? '#10b981' : media.score > 25 ? '#f59e0b' : '#ef4444'} ${media.score}%, #e5e7eb ${media.score}%)`
                   }}>
                     <span>{media.score}</span>
                   </div>
@@ -1056,6 +1279,115 @@ function Dashboard() {
 
     const totalThematic = Math.round(thematicsToDisplay.reduce((acc, t) => acc + t.value, 0));
 
+    // Fonction pour exporter l'analyse du média en PNG format A4
+    const exportMediaAnalysisToPNG = async () => {
+      try {
+        const html2canvas = (await import('html2canvas')).default;
+        
+        const periodLabel = mediaAnalysisTimeRange === 'all' ? 'Tous_les_temps' : 
+                           mediaAnalysisTimeRange === '1h' ? '1_heure' : 
+                           mediaAnalysisTimeRange === '6h' ? '6_heures' : 
+                           mediaAnalysisTimeRange === '24h' ? '24_heures' : 
+                           mediaAnalysisTimeRange === '7d' ? '7_jours' : '30_jours';
+
+        const loadingToast = toast.loading('Préparation de l\'export format A4...');
+
+        // Créer un conteneur format A4
+        const exportContainer = document.createElement('div');
+        exportContainer.style.cssText = `
+          position: fixed;
+          left: -9999px;
+          top: 0;
+          width: 794px;
+          background: white;
+          padding: 40px;
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        `;
+        document.body.appendChild(exportContainer);
+
+        // Titre
+        const title = document.createElement('div');
+        title.style.cssText = `
+          font-size: 24px;
+          font-weight: 700;
+          color: #1e293b;
+          margin-bottom: 8px;
+          text-align: center;
+        `;
+        title.textContent = `Analyse Média: ${selectedMedia.name} - ${periodLabel}`;
+        exportContainer.appendChild(title);
+
+        // Date
+        const dateDiv = document.createElement('div');
+        dateDiv.style.cssText = `
+          font-size: 14px;
+          color: #64748b;
+          margin-bottom: 30px;
+          text-align: center;
+        `;
+        dateDiv.textContent = new Date().toLocaleDateString('fr-FR', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+        exportContainer.appendChild(dateDiv);
+
+        // Sections à exporter
+        const sectionsToExport = [
+          { selector: '.media-profile-header', name: 'Profil', marginBottom: '20px' },
+          { selector: '.details-stats-grid', name: 'Statistiques', marginBottom: '30px' },
+          { selector: '.details-charts-section', name: 'Graphiques', marginBottom: '20px' }
+        ];
+
+        // Cloner et ajouter chaque section
+        for (let i = 0; i < sectionsToExport.length; i++) {
+          const section = sectionsToExport[i];
+          const element = document.querySelector(section.selector);
+          
+          if (element) {
+            toast.loading(`Ajout ${i + 1}/${sectionsToExport.length}: ${section.name}...`, { id: loadingToast });
+            
+            const clone = element.cloneNode(true);
+            clone.style.cssText = `
+              width: 100%;
+              background: transparent;
+              margin-bottom: ${section.marginBottom};
+            `;
+            exportContainer.appendChild(clone);
+          }
+        }
+
+        // Attendre le rendu
+        toast.loading('Génération de l\'image...', { id: loadingToast });
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Capturer en PNG
+        const canvas = await html2canvas(exportContainer, {
+          backgroundColor: '#ffffff',
+          scale: 2,
+          logging: false,
+          useCORS: true,
+          width: 794,
+          windowWidth: 794
+        });
+
+        // Télécharger
+        const link = document.createElement('a');
+        link.download = `Analyse_${selectedMedia.name.replace(/\s+/g, '_')}_${periodLabel}_${new Date().toISOString().split('T')[0]}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+
+        // Nettoyer
+        document.body.removeChild(exportContainer);
+        toast.success('Analyse média exportée en format A4!', { id: loadingToast });
+        
+      } catch (error) {
+        console.error('Erreur export:', error);
+        toast.error('Erreur lors de l\'export de l\'analyse');
+      }
+    };
+
     return (
       <div className="media-details-container">
         {/* En-tête avec retour et sélecteur de temps */}
@@ -1092,6 +1424,25 @@ function Dashboard() {
               ))}
             </div>
           </div>
+
+          {/* Bouton export */}
+          <button 
+            className="export-media-analysis-btn"
+            onClick={exportMediaAnalysisToPNG}
+            title="Exporter l'analyse en PNG"
+            style={{
+              background: selectedMedia.couleur || selectedMedia.color,
+              boxShadow: `0 4px 12px ${selectedMedia.couleur || selectedMedia.color}50`
+            }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span>Exporter</span>
+            <span className="export-period-badge">{mediaAnalysisTimeRange === 'all' ? 'Tous' : mediaAnalysisTimeRange === '1h' ? '1h' : mediaAnalysisTimeRange === '6h' ? '6h' : mediaAnalysisTimeRange === '24h' ? '24h' : mediaAnalysisTimeRange === '7d' ? '7j' : '30j'}</span>
+          </button>
         </div>
 
         {/* Profil du média */}
@@ -1811,175 +2162,68 @@ function Dashboard() {
   };
 
   const renderAlertsSystem = () => {
-    // Données des alertes par média
-    const mediaAlerts = [
-      {
-        id: 1,
-        name: 'Radio Omega',
-        color: '#ef4444',
-        alerts: [
-          {
-            id: 1,
-            type: 'anger',
-            icon: Angry,
-            color: '#ef4444',
-            title: 'Niveau élevé de colère',
-            description: 'Détection de sentiments de colère à 65% sur une publication récente',
-            severity: 'high',
-            timestamp: 'Il y a 25 min'
-          },
-          {
-            id: 2,
-            type: 'hate',
-            icon: AlertTriangle,
-            color: '#dc2626',
-            title: 'Contenu haineux détecté',
-            description: 'Plusieurs commentaires haineux identifiés dans les réactions',
-            severity: 'critical',
-            timestamp: 'Il y a 1h'
-          },
-          {
-            id: 3,
-            type: 'influence',
-            icon: TrendingUp,
-            color: '#f59e0b',
-            title: 'Hausse inhabituelle du score d\'influence',
-            description: 'Augmentation de 45% du score d\'influence en 24h',
-            severity: 'medium',
-            timestamp: 'Il y a 3h'
-          }
-        ]
-      },
-      {
-        id: 2,
-        name: 'Le Pays',
-        color: '#f59e0b',
-        alerts: [
-          {
-            id: 1,
-            type: 'conformity',
-            icon: Activity,
-            color: '#ef4444',
-            title: 'Taux de conformité très bas',
-            description: 'Taux de conformité à 45%, en dessous du seuil de 70%',
-            severity: 'high',
-            timestamp: 'Il y a 2h'
-          },
-          {
-            id: 2,
-            type: 'inactive',
-            icon: Clock,
-            color: '#64748b',
-            title: 'Média inactif',
-            description: 'Aucune publication depuis 48 heures',
-            severity: 'medium',
-            timestamp: 'Il y a 2 jours'
-          }
-        ]
-      },
-      {
-        id: 3,
-        name: 'BurkinaInfo',
-        color: '#ec4899',
-        alerts: [
-          {
-            id: 1,
-            type: 'fake',
-            icon: AlertTriangle,
-            color: '#dc2626',
-            title: 'Suspicion de fake news',
-            description: 'Contenu non vérifié détecté dans 3 publications récentes',
-            severity: 'critical',
-            timestamp: 'Il y a 4h'
-          },
-          {
-            id: 2,
-            type: 'anger',
-            icon: Angry,
-            color: '#ef4444',
-            title: 'Réactions négatives élevées',
-            description: 'Taux de colère à 58% sur les 5 dernières publications',
-            severity: 'high',
-            timestamp: 'Il y a 6h'
-          },
-          {
-            id: 3,
-            type: 'engagement',
-            icon: TrendingDown,
-            color: '#f59e0b',
-            title: 'Baisse de l\'engagement',
-            description: 'Diminution de 35% de l\'engagement en une semaine',
-            severity: 'medium',
-            timestamp: 'Il y a 12h'
-          }
-        ]
-      },
-      {
-        id: 4,
-        name: 'Faso 24',
-        color: '#06b6d4',
-        alerts: [
-          {
-            id: 1,
-            type: 'conformity',
-            icon: Activity,
-            color: '#ef4444',
-            title: 'Non-conformité détectée',
-            description: 'Plusieurs violations des règles de publication identifiées',
-            severity: 'high',
-            timestamp: 'Il y a 8h'
-          }
-        ]
-      },
-      {
-        id: 5,
-        name: 'L\'Observateur Paalga',
-        color: '#10b981',
-        alerts: [
-          {
-            id: 1,
-            type: 'influence',
-            icon: TrendingUp,
-            color: '#f59e0b',
-            title: 'Croissance rapide du score d\'influence',
-            description: 'Score d\'influence a doublé en 48h, nécessite vérification',
-            severity: 'medium',
-            timestamp: 'Il y a 5h'
-          },
-          {
-            id: 2,
-            type: 'suspicious',
-            icon: Eye,
-            color: '#f59e0b',
-            title: 'Activité suspecte',
-            description: 'Pic inhabituel de publications (25 articles en 2h)',
-            severity: 'medium',
-            timestamp: 'Il y a 7h'
-          }
-        ]
-      }
-    ];
-
-    const getSeverityLabel = (severity) => {
-      switch(severity) {
-        case 'critical':
-          return { label: 'CRITIQUE', color: '#dc2626' };
-        case 'high':
-          return { label: 'ÉLEVÉE', color: '#ef4444' };
-        case 'medium':
-          return { label: 'MOYENNE', color: '#f59e0b' };
-        default:
-          return { label: 'FAIBLE', color: '#10b981' };
-      }
+    const getAlertIcon = (type) => {
+      const icons = {
+        pic_engagement: TrendingUp,
+        chute_engagement: TrendingDown,
+        inactivite: Clock,
+        explosion_publications: Activity,
+        baisse_influence: TrendingDown,
+        regularite_faible: Clock,
+        ratio_engagement_faible: Eye,
+        ratio_engagement_eleve: Bell,
+        nouveau_media_actif: Activity,
+        thematique_dominante: Filter,
+        record_engagement: TrendingUp,
+        commentaires_eleves: MessageCircle
+      };
+      return icons[type] || AlertTriangle;
     };
 
-    const totalAlerts = mediaAlerts.reduce((acc, media) => acc + media.alerts.length, 0);
-    const criticalAlerts = mediaAlerts.reduce((acc, media) => 
-      acc + media.alerts.filter(a => a.severity === 'critical').length, 0
-    );
-    const highAlerts = mediaAlerts.reduce((acc, media) => 
-      acc + media.alerts.filter(a => a.severity === 'high').length, 0
-    );
+    const getAlertColor = (severite) => {
+      const colors = {
+        critical: '#dc2626',
+        high: '#ea580c',
+        medium: '#ca8a04',
+        low: '#2563eb'
+      };
+      return colors[severite] || '#6b7280';
+    };
+
+    const getSeverityLabel = (severity) => {
+      const labels = {
+        critical: { label: 'CRITIQUE', color: '#dc2626' },
+        high: { label: 'ÉLEVÉE', color: '#ef4444' },
+        medium: { label: 'MOYENNE', color: '#f59e0b' },
+        low: { label: 'INFO', color: '#10b981' }
+      };
+      return labels[severity] || { label: 'INCONNU', color: '#6b7280' };
+    };
+
+    const formatTimeAgo = (dateString) => {
+      const date = new Date(dateString);
+      const now = new Date();
+      const diffMs = now - date;
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      const diffDays = Math.floor(diffMs / 86400000);
+
+      if (diffMins < 1) return 'À l\'instant';
+      if (diffMins < 60) return `Il y a ${diffMins} min`;
+      if (diffHours < 24) return `Il y a ${diffHours}h`;
+      if (diffDays < 7) return `Il y a ${diffDays}j`;
+      
+      return date.toLocaleDateString('fr-FR', { 
+        day: 'numeric', 
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    };
+
+    const totalAlerts = alertsStats?.total_active || 0;
+    const criticalAlerts = alertsStats?.by_severity?.critical || 0;
+    const highAlerts = alertsStats?.by_severity?.high || 0;
 
     return (
       <div className="alerts-system-container">
@@ -2019,61 +2263,113 @@ function Dashboard() {
           </div>
         </div>
 
-        <div className="alerts-list">
-          {mediaAlerts.map((media) => (
-            <div key={media.id} className="media-alerts-section">
-              <div className="media-alerts-header">
-                <div className="media-name-badge">
-                  <div className="media-icon-badge" style={{ backgroundColor: `${media.color}15` }}>
-                    <Newspaper size={24} style={{ color: media.color }} />
-                  </div>
-                  <h3>{media.name}</h3>
-                  <span className="alerts-count">{media.alerts.length} alerte{media.alerts.length > 1 ? 's' : ''}</span>
-                </div>
-              </div>
-
-              <div className="alerts-items-row">
-                {media.alerts.map((alert) => {
-                  const severityInfo = getSeverityLabel(alert.severity);
-                  return (
-                    <div key={alert.id} className={`alert-card severity-${alert.severity}`}>
-                      <div className="alert-card-header">
-                        <div className="alert-icon" style={{ backgroundColor: `${alert.color}15` }}>
-                          <alert.icon size={24} style={{ color: alert.color }} />
-                        </div>
-                        <span 
-                          className="alert-severity-badge"
-                          style={{ 
-                            backgroundColor: `${severityInfo.color}15`,
-                            color: severityInfo.color 
-                          }}
-                        >
-                          {severityInfo.label}
-                        </span>
-                      </div>
-                      
-                      <h4 className="alert-title">{alert.title}</h4>
-                      <p className="alert-description">{alert.description}</p>
-                      
-                      <div className="alert-footer">
-                        <div className="alert-timestamp">
-                          <Clock size={14} />
-                          <span>{alert.timestamp}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
+        {/* Filtres de sévérité */}
+        <div className="alerts-filters-bar">
+          <button 
+            className={`filter-btn ${severityFilter === 'all' ? 'active' : ''}`}
+            onClick={() => setSeverityFilter('all')}
+          >
+            Toutes
+          </button>
+          <button 
+            className={`filter-btn ${severityFilter === 'critical' ? 'active critical' : ''}`}
+            onClick={() => setSeverityFilter('critical')}
+          >
+            🔴 Critiques
+          </button>
+          <button 
+            className={`filter-btn ${severityFilter === 'high' ? 'active high' : ''}`}
+            onClick={() => setSeverityFilter('high')}
+          >
+            🟠 Élevées
+          </button>
+          <button 
+            className={`filter-btn ${severityFilter === 'medium' ? 'active medium' : ''}`}
+            onClick={() => setSeverityFilter('medium')}
+          >
+            🟡 Moyennes
+          </button>
+          <button 
+            className={`filter-btn ${severityFilter === 'low' ? 'active low' : ''}`}
+            onClick={() => setSeverityFilter('low')}
+          >
+            🔵 Infos
+          </button>
         </div>
 
-        {mediaAlerts.length === 0 && (
-          <div className="no-alerts">
-            <Bell size={64} />
-            <h3>Aucune alerte active</h3>
-            <p>Tous les médias fonctionnent normalement</p>
+        {alertsLoading ? (
+          <div className="loading-state">
+            <div className="spinner"></div>
+            <p>Chargement des alertes...</p>
+          </div>
+        ) : alertsData.length === 0 ? (
+          <div className="no-alerts-container">
+            <div className="no-alerts-header">
+              <Bell size={48} style={{ color: '#10b981' }} />
+              <h3>Aucune alerte active</h3>
+              <p>Tous les médias fonctionnent normalement.</p>
+            </div>
+          </div>
+        ) : (
+          <div className="alerts-list">
+            {alertsData.map((media) => (
+              <div key={media.id} className="media-alerts-section">
+                <div className="media-alerts-header">
+                  <div className="media-name-badge">
+                    <div className="media-icon-badge" style={{ backgroundColor: `${media.color}15` }}>
+                      <Newspaper size={24} style={{ color: media.color }} />
+                    </div>
+                    <h3>{media.name}</h3>
+                    <span className="alerts-count">{media.alerts.length} alerte{media.alerts.length > 1 ? 's' : ''}</span>
+                  </div>
+                </div>
+
+                <div className="alerts-items-row">
+                  {media.alerts.map((alert) => {
+                    const severityInfo = getSeverityLabel(alert.severite);
+                    const AlertIcon = getAlertIcon(alert.type);
+                    const alertColor = getAlertColor(alert.severite);
+                    
+                    return (
+                      <div key={alert.id} className={`alert-card severity-${alert.severite}`}>
+                        <div className="alert-card-header">
+                          <div className="alert-icon" style={{ backgroundColor: `${alertColor}15` }}>
+                            <AlertIcon size={24} style={{ color: alertColor }} />
+                          </div>
+                          <span 
+                            className="alert-severity-badge"
+                            style={{ 
+                              backgroundColor: `${severityInfo.color}15`,
+                              color: severityInfo.color 
+                            }}
+                          >
+                            {severityInfo.label}
+                          </span>
+                        </div>
+                        
+                        <h4 className="alert-title">{alert.titre}</h4>
+                        <p className="alert-description">{alert.message}</p>
+                        
+                        <div className="alert-footer">
+                          <div className="alert-timestamp">
+                            <Clock size={14} />
+                            <span>{formatTimeAgo(alert.date)}</span>
+                          </div>
+                          <button 
+                            className="resolve-alert-btn"
+                            onClick={() => resolveAlertInPage(alert.id)}
+                            title="Marquer comme résolu"
+                          >
+                            <X size={16} />
+                            Résoudre
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -2084,7 +2380,11 @@ function Dashboard() {
     <div className="dashboard-container">
       <aside className="dashboard-sidebar">
         <div className="sidebar-header">
-          <Activity size={40} className="sidebar-logo" />
+          <img 
+            src="/imageonline-co-pixelated-removebg-preview.png" 
+            alt="CSC Logo" 
+            className="sidebar-logo-image"
+          />
           <h2>MÉDIA-SCAN</h2>
           <p>CSC Dashboard</p>
         </div>
@@ -2141,6 +2441,19 @@ function Dashboard() {
               </div>
             </div>
             <div className="header-right">
+              {/* Bouton Alertes */}
+              <button 
+                className="alerts-btn"
+                onClick={() => setShowAlertsPanel(true)}
+                title="Voir les alertes"
+              >
+                <AlertTriangle size={20} />
+                {alertsCount > 0 && (
+                  <span className="alerts-badge">{alertsCount}</span>
+                )}
+              </button>
+              
+              {/* Bouton Notifications */}
               <NotificationBell onShowReport={(stats) => {
                 setShowReportModal(true);
               }} />
@@ -2149,6 +2462,14 @@ function Dashboard() {
         )}
 
         {renderContent()}
+        
+        {/* Panel des alertes */}
+        {showAlertsPanel && (
+          <AlertsPanel onClose={() => {
+            setShowAlertsPanel(false);
+            loadAlertsCount(); // Recharger le compteur après fermeture
+          }} />
+        )}
         
         {/* Modal de rapport de scraping */}
         <ScrapingReportModal 

@@ -70,6 +70,96 @@ def add_notification(notification):
     logger.info(f"📢 Notification ajoutée: {notification['title']}")
 
 
+def run_alerts_check():
+    """
+    🚨 Vérifie et génère les alertes pour tous les médias
+    Appelé toutes les heures
+    """
+    try:
+        logger.info("🚨 Vérification des alertes...")
+        
+        # Importer les dépendances
+        from supabase import create_client
+        import os
+        from dotenv import load_dotenv
+        
+        load_dotenv()
+        
+        # Créer le client Supabase
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Importer le générateur d'alertes
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from utils.alert_generator import AlertGenerator
+        
+        generator = AlertGenerator(supabase)
+        
+        # Récupérer tous les médias actifs
+        medias = supabase.table('medias')\
+            .select('id, name, followers, creation_date, is_active')\
+            .eq('is_active', True)\
+            .execute()
+        
+        total_alerts = 0
+        
+        for media in medias.data:
+            # Calculer la régularité (90 jours)
+            from datetime import timedelta
+            ninety_days_ago = datetime.utcnow() - timedelta(days=90)
+            articles_90d = supabase.table('articles')\
+                .select('date')\
+                .eq('media_id', media['id'])\
+                .gte('date', ninety_days_ago.isoformat())\
+                .execute()
+            
+            dates_with_articles = set()
+            for article in articles_90d.data:
+                article_date = datetime.fromisoformat(article['date'].replace('Z', '+00:00')).date()
+                dates_with_articles.add(article_date)
+            
+            days_with_publications = len(dates_with_articles)
+            regularite = (days_with_publications / 90) * 100
+            
+            media['regularite'] = regularite
+            
+            # Générer les alertes pour ce média
+            alerts = generator.generate_alerts_for_media(media)
+            
+            # Sauvegarder les alertes
+            for alert in alerts:
+                if generator.save_alert(alert):
+                    total_alerts += 1
+                    
+                    # Créer une notification pour les alertes critiques et high
+                    if alert['severite'] in ['critical', 'high']:
+                        severity_emoji = '🔴' if alert['severite'] == 'critical' else '🟠'
+                        add_notification({
+                            'type': 'alert',
+                            'title': f'{severity_emoji} {alert["titre"]}',
+                            'message': alert['message'],
+                            'severity': alert['severite'],
+                            'timestamp': datetime.now().isoformat()
+                        })
+        
+        logger.info(f"✅ Vérification des alertes terminée: {total_alerts} nouvelles alertes")
+        
+        # Notification récapitulative si des alertes ont été créées
+        if total_alerts > 0:
+            add_notification({
+                'type': 'info',
+                'title': f'🚨 {total_alerts} nouvelles alertes détectées',
+                'message': f'Vérification automatique des métriques terminée',
+                'timestamp': datetime.now().isoformat()
+            })
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur lors de la vérification des alertes: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def run_unified_pipeline():
     """
     Exécute les 2 pipelines en parallèle:
@@ -290,11 +380,13 @@ def run_unified_pipeline():
 
 def start_unified_scheduler():
     """
-    Démarre le scheduler unifié qui lance les 2 pipelines toutes les 10 minutes
+    Démarre le scheduler unifié qui lance:
+    - Les 2 pipelines (WEB + Facebook) toutes les 10 minutes
+    - La vérification des alertes toutes les heures
     """
     scheduler = BackgroundScheduler()
     
-    # Ajouter le job pour lancer les 2 pipelines toutes les 10 minutes
+    # Job 1: Pipelines toutes les 10 minutes
     scheduler.add_job(
         func=run_unified_pipeline,
         trigger='interval',
@@ -304,6 +396,24 @@ def start_unified_scheduler():
         replace_existing=True,
         max_instances=1  # Un seul job à la fois
     )
+    
+    # Job 2: Alertes toutes les heures
+    scheduler.add_job(
+        func=run_alerts_check,
+        trigger='interval',
+        hours=1,
+        id='alerts_check_job',
+        name='Vérification des alertes',
+        replace_existing=True,
+        max_instances=1
+    )
+    
+    # Exécuter la vérification des alertes au démarrage
+    logger.info("🚨 Lancement initial de la vérification des alertes...")
+    try:
+        run_alerts_check()
+    except Exception as e:
+        logger.error(f"❌ Erreur lors de la vérification initiale des alertes: {e}")
     
     # Listener pour les événements
     def job_listener(event):
@@ -315,9 +425,10 @@ def start_unified_scheduler():
     scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
     
     scheduler.start()
-    logger.info("✅ Scheduler unifié démarré - Pipelines toutes les 10 minutes")
-    logger.info("   📰 Pipeline WEB + 👥 Pipeline Facebook")
-    logger.info("   ⏰ Prochaine exécution dans 10 minutes")
+    logger.info("✅ Scheduler unifié démarré")
+    logger.info("   📰 Pipeline WEB + 👥 Pipeline Facebook toutes les 10 minutes")
+    logger.info("   🚨 Vérification des alertes toutes les heures")
+    logger.info("   ⏰ Prochaine exécution des pipelines dans 10 minutes")
     
     return scheduler
 
