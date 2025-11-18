@@ -1,0 +1,10 @@
+{
+  "database": {
+    "host": "db.msossvkhusojazzondin.supabase.co",
+    "port": 5432,
+    "dbname": "postgres",
+    "user": "postgres",
+    "password": "VOTRE_MOT_DE_PASSE_SUPABASE"
+  },
+  "gemini_api_key": "AIzaSyAsE4BaxbsWmsqEUFxkRNGuaHuaSOJ43Fo"
+}

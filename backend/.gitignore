@@ -1,0 +1,47 @@
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# Environment variables
+.env
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+instance/
+
+# Flask
+instance/
+.webassets-cache
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# ML Models
+models/*.pkl
+models/*.h5
+models/*.pt
+
+# Data
+data/
+scraped_data/
+
+# OS
+.DS_Store
+Thumbs.db
